@@ -39,6 +39,11 @@ The repository is organized as follows:
   memory address and supplies them as inputs to the advanced client.
 * **BranchMonitor**: The monitoring driver.
 * **DumpDLL**: A tool to ease introspection headers generation.
+* **Transparency.Tests**: Tools to attest BranchMonitor's transparency.
+* **ROP**: CFI verification tools to be used on execution traces.
+* **Debugger**: A debugger built upon BranchMonitor framework.
+* **Utils**: General utils for binary analysis using BranchMonitor.
+* **PIN.Branch.Monitor**: A DBT-Based branch monitor implementation, used for comparative purposes.
 
 
 ### Dependencies
@@ -137,6 +142,9 @@ paths on the compilation project, as shown below:
 In my computer, I was compiling under C:\\. If you are compiling from other dir,
 you need to point /src path properly.
 
+To make the *BranchClient* compilation easier, I included the
+*capstone-3.0.4-win64* on the repository.
+
 You should also define system architecture and configurations, as shown below:
 
 ![Solution Configuration](screenshots/compiler.config.png)
@@ -178,6 +186,32 @@ After its startup, the client is already working, as shown below:
 
 ![BranchClient in action](screenshots/BranchClient.png)
 
+#### Examples
+
+The *BranchClient\examples* directory contains some trace examples obtained from real malware samples. I hope they could clarify BranchMonitor's role on binary monitoring. Some identified actions are shown below:
+
+```
+LIB C:\Windows\SysWOW64\user32.dll at 74c68038 (GetCursorPos+0x12) returned to Binary avr.exe at 465806
+```
+
+```
+LIB C:\Windows\SysWOW64\user32.dll at 76489ddc (IsWindowVisible+0x38) returned to Binary Chrome.exe at 4c52a5
+```
+
+In such cases, these functions were used to display the following message:
+
+![Message displayed by a malware sample](screenshots/malware.png))
+
+#### Transparency
+
+One of biggest advantages of using BranchMonitor is the provided transparency. In order to verify such claim, you can use the checks from the *Transparency.Tests* directory. My intention is not to provide an exhaustive list of *anti-dbg* techniques, but some transparency insights instead. 
+
+Currently implemented tests:
+
+* *IsDebuggerPresent*
+* *CheckRemoteDebugger*
+* *OutputDebugString*
+
 ### Debugging
 
 You can check debug messages if the driver was compiled using the DEBUG flag, as shown:
@@ -191,6 +225,167 @@ The debug messages are printed on a debug screen. The following figure shows the
 ![Debugging messages printed on DbgView](screenshots/debug.png)
 
 
+## Applications
+
+Applications build upon the developed framework.
+
+### Debugger
+
+A debugger built upon BranchMonitor framework. The directory is organized as follows:
+
+* **GDB**: A GDB stub which can be used to control the BranchMonitor debugger. On the original article, it was integrated into the debugger solution itself, but I released here an standalone version, so people can use it on distinct applications. It is totally based on [mseaborn's gdb-debug-stub](https://github.com/mseaborn/gdb-debug-stub).
+* **Driver**: To be released.
+
+#### GDB Usage
+
+The GDB stub is available by setting the *remote target* on the GDB client, as shown below:
+
+![GDB stub](screenshots/GDB.png)
+
+More information is coming soon.
+
+### ROP Detector
+
+As a result of BranchMonitoring framework, some Control Flow Integrity (CFI) policies for ROP attack detection were implemented. You can find on the *ROP* directory implementations for the *CALL-RET* and the *Gadget-Size* policies. Although I have previously described on an article a real-time solution, the hereby published tools are intended for post-analysis. However, you can easily implement these algorithms on the *DriverClient*, since the traces were retrieved from the tool.
+
+The *CALL-RET* policy consists on matching pairs of *CALLs* and *RETs*, based on the idea of each *RET* must be preceed by a *CALL* on an integer flow. This policy is shown below:
+
+```
+('CURRENT STACK ', [['call', 'NewToy', 'printf']])
+('CURRENT STACK ', [['call', 'NewToy', 'printf'], ['call', 'printf', '__iob_func']])
+('CURRENT STACK ', [['call', 'NewToy', 'printf'], ['call', 'printf', '__iob_func'], ['ret', '__iob_func', 'printf']])
+CALL-RET MATCH, REMOVING
+...
+('CURRENT STACK ', [['call', 'NewToy', 'printf']])
+('CURRENT STACK ', [['call', 'NewToy', 'printf'], ['ret', 'printf', 'NewToy']])
+CALL-RET MATCH, REMOVING
+('CURRENT STACK ', [])
+```
+
+The gadget size policy is a heuristic which assumes ROP gadgets are smaller than ordinary ones, so a moving window is used to register the execution of a given number of small gadgets, as shown below:
+
+```
+('Detected in', [2, 17, 36, 4, 2, 27, 13, 5, 46, 2])
+```
+
+## Utils
+
+The *Utils* directory contains some tools and utilities for binary analysis using BranchMonitor. Currently, the following tools are available:
+
+* **PrintFunc**: A simple script for printing the functions called on a given trace
+* **ManualDisasm**: A [pybfd](https://github.com/Groundworkstech/pybfd)-based solution for disasming small bytes.
+
+### PrintFunc
+
+This utility should be used as follows:
+
+```
+Usage: python PrintFunc.py <trace> --remove-offsets
+
+```
+
+The called functions can be printed considering or not their offsets, as shown below:
+
+*Considering Offsets*:
+```
+LdrShutdownProcess+0x256
+LdrShutdownProcess+0x2b7
+RtlExitUserProcess+0xac
+```
+
+*Discarding Offsets*:
+```
+LdrShutdownProcess
+LdrShutdownProcess
+RtlExitUserProcess
+```
+
+You can filter the output in order to increase your analysis power. The following example shows function calls being counted.
+
+*Counting command*:
+
+```
+python PrintFunc.py $1 $2 | sort | uniq -c | sort -gr
+```
+*Command Output*:
+
+```
+56 printf
+12 WriteFile
+10 TerminateThread
+2 ExitProcess
+```
+
+### ManualDisasm
+
+A tool to disasm small pieces of code from trace-retrieved data. 
+
+*Usage Example*:
+
+```
+Usage: python ManualDisasm.py <trace> <addr>
+```
+
+Example Considering the following trace excerpt:
+
+```
+should disasm from 444417 to 444427
+\x8b\x45\xf0\x3b\xc7\x74\x11\x8d\x4d\xf0\x51\x8b\x4d\x08\x48\x50
+```
+
+*Command Example*:
+
+```
+python ManualDisasm.py "\x8b\x45\xf0\x3b\xc7\x74\x11\x8d\x4d\xf0\x51\x8b\x4d\x08\x48\x50" 0
+```
+*Command Output*:
+
+```
+0x4 (size=1)	 pop    rsp
+0x5 (size=2)	 js     0x000000000000003b
+0x7 (size=5)	 xor    eax,0x3066785c
+0xC (size=1)	 pop    rsp
+0xD (size=2)	 js     0x0000000000000042
+```
+
+## Comparing BranchMonitor with other solutions
+
+Always as possible, I try to compare BranchMonitor with other solutions,
+either for validation or evaluation. For such purpose, I present here a
+Dynamic Binary Translation (DBT) tool, implemented on [Intel
+PIN](https://software.intel.com/en-us/articles/pin-a-dynamic-binary-instrumentation-tool).
+The tool directory, *PIN.Branch.Monitor*, is organized as follows:
+
+* *Windows*: Instrumentation code to be run on Windows.
+* *Linux*: Instrumentation code to be run on Linux.
+* *Comparison*: Comparison results between PIN tool and BranchMonitor.
+
+As this tool is implemented as an instrumentation code, it can be run on
+Linux or Windows. The small differences between the two versions are
+function or type names.
+
+The *Comparison* directory presents the results from running the
+*Branch.Tester* code on BranchMonitor and the PIN tool. As can be
+noticed on the example above, the results are similar.
+
+*PIN Result*:
+
+```
+From: 0000000077332F89 To: 0x7732ec90 Disasm of 1 instr: call
+From: 000000007732EC97 To: 0x7732ecab Disasm of 1 instr: jnz
+Disasm of 0x7 bytes from 000000007732EC90: 0x48 0x3b 0xd 0x39 0x8e 0xe 0x0
+```
+
+*BranchMonitor Result*:
+
+```
+Binary C:\BranchMonitoringProject\Branch.Tester\x64\Debug\Branch.Tester.exe at <0x1ca1> to Binary C:\BranchMonitoringProject\Branch.Tester\x64\Debug\Branch.Tester.exe at <0x1c90>
+Binary C:\BranchMonitoringProject\Branch.Tester\x64\Debug\Branch.Tester.exe at <0x1c96> to Binary C:\BranchMonitoringProject\Branch.Tester\x64\Debug\Branch.Tester.exe at <0x1c9a>
+should disasm from 7ff6d6ec1c90 to 7ff6d6ec1c96
+```
+
+On both cases, the same number of bytes were considered on the execution trace.
+
 ## Open Implementation Issues
 
 I am performing some code clean up before publishing the final solution. This
@@ -200,8 +395,6 @@ soon as possible.
 What is missing:
 
 * **Inverted I/O implementation**: Used for *branch-by-branch* debugging.
-* **GDB stub**: The debugger client.
-* **ROP Detector**: A special client which implements a CFI policy.
 
 ## Limitations
 
@@ -223,5 +416,32 @@ This framework is presented as a *proof-of-concept* (PoC) of the branch monitori
 
 ## Future Plans
 
-Multi-Core implementation is coming! I only need to hook
+* Multi-Core implementation is coming! I only need to hook
 *HalpPerfInterruptHandler*.
+* Linux version is coming!
+
+## Contributions
+
+I really would like to receive your contributions. By now, a non-exhaustive list of possible contributions:
+
+* *Implementing missing features*: See *Limitations* section.
+* *Solving TO-DOs*: Lots of improvements along the code.
+* *Replacing insecure functions*: Remove all *strcpy* and *shell=True* from the code.
+* *Add new Utils*: The more analysis tools the better!
+
+## Publications
+
+I hope I could provide the community all details regarding branch monitoring on a near future.
+
+## Media
+
+Check out our [Youtube playlist](https://www.youtube.com/watch?v=BguVzqMt_j0&list=PLVYZ2jULLUDvqFVpU3pCZGlY9gCzYoyXP).
+
+## Mentions to the BranchMonitoring project
+
+It is always great to have you efforts acknowledged, so I present here some mentions to this work:
+
+* [Capstone Site](http://www.capstone-engine.org/showcase.html)
+* [Reddit Topic](https://www.reddit.com/r/ReverseEngineering/comments/5ycg08/code_tracing_framework_based_on_intel_branch/)
+
+Please tell me if you are using/referring this project.
