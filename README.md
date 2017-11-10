@@ -37,7 +37,8 @@ The repository is organized as follows:
 * **Branch.Tester**: A loop program used for validation purposes.
 * **Launcher**: A tool to ease monitoring process start up. Given a PID, dumps all
   memory address and supplies them as inputs to the advanced client.
-* **BranchMonitor**: The monitoring driver.
+* **BranchMonitor**: The monitoring driver (NMI handler).
+* **BranchMonitor.2**: The monitoring driver (PMI handler).
 * **DumpDLL**: A tool to ease introspection headers generation.
 * **Transparency.Tests**: Tools to attest BranchMonitor's transparency.
 * **ROP**: CFI verification tools to be used on execution traces.
@@ -45,6 +46,9 @@ The repository is organized as follows:
 * **Utils**: General utils for binary analysis using BranchMonitor.
 * **PIN.Branch.Monitor**: A DBT-Based branch monitor implementation, used for comparative purposes.
 
+### Versions
+
+Currently, the *BranchMonitor* driver is available on two versions. The first is implemented using an NMI callback to handle interrupts whereas the second is implemented by hooking the performance handler to do so.
 
 ### Dependencies
 
@@ -59,6 +63,7 @@ The repository is organized as follows:
 * Automatic launcher requires [Python](https://www.python.org/), [Sysinternals](https://technet.microsoft.com/en-us/sysinternals/bb545021.aspx), [BeautifulSoup](https://pypi.python.org/pypi/beautifulsoup4), [Codecs](https://docs.python.org/2/library/codecs.html), and [ConfigParser](https://docs.python.org/2/library/configparser.html).
 * DLL dumps for *DumpDLL* are obtained using [DLL Export
   Viewer](http://www.nirsoft.net/utils/dll_export_viewer.html).
+* The traces inputed to the *Divergence.Analysis* tool are aligned using the [Alignment library](https://pypi.python.org/pypi/alignment/1.0.9).
 
 ### Configuring
 
@@ -212,6 +217,8 @@ Currently implemented tests:
 * *CheckRemoteDebugger*
 * *OutputDebugString*
 
+For more information about anti-analysis tricks, check [this](https://github.com/marcusbotacin/Anti.Analysis).
+
 ### Debugging
 
 You can check debug messages if the driver was compiled using the DEBUG flag, as shown:
@@ -267,6 +274,42 @@ The gadget size policy is a heuristic which assumes ROP gadgets are smaller than
 ```
 ('Detected in', [2, 17, 36, 4, 2, 27, 13, 5, 46, 2])
 ```
+
+### Anti-Analysis Tricks Detection
+
+Given the transparency characteristic, our framework is able to execute anti-analysis tricks without any problem. It allows us to perform pattern matching searches for evasion attempts and other tricks. By using [these detectors](https://github.com/marcusbotacin/Anti.Analysis), I was able to detect some of them, shown below:
+
+Fake Conditional Jump:
+```
+4001b: xor    %eax,%eax
+4001d: jne    4000 <main>
+4001f: pop    %rbp
+```
+
+CPU Comparison:
+```
+4400:   push   %rbp
+4401:   str    0x0(%ebp)
+4406:   mov    %rsp,%rbp
+4409:   mov    $0x0,%edi
+440e:   callq  44013 <main+0x13>
+```
+
+### Divergence Analysis
+
+One can also use our transparent tracer as a groundtruth for evaluating the way a binary executes inside another tracing tool. The tool under the *Utils/Divergence.Analysis* is suited for this task. A divergence example is shown below:
+
+```
+0x01 | 0x01
+0x02 | 0x02
+    / \
+---- | 0x41
+0x03 | 0x42
+    \ /
+0x05 | 0x05
+0x06 | 0x06
+```
+The aforementioned tricks were also detected by inspecting the instruction block placed right before a divergent branch instruction.
 
 ## Utils
 
@@ -392,10 +435,6 @@ I am performing some code clean up before publishing the final solution. This
 way, some features are not available yet. I plan to release such features as
 soon as possible. 
 
-What is missing:
-
-* **Inverted I/O implementation**: Used for *branch-by-branch* debugging.
-
 ## Limitations
 
 This framework is presented as a *proof-of-concept* (PoC) of the branch monitoring capabilities, thus some limitations exists, such as:
@@ -414,10 +453,13 @@ This framework is presented as a *proof-of-concept* (PoC) of the branch monitori
 * **BranchClient Multi-Thread Support**: How to launch more threads without
   breaking flow tracking ?
 
+## Other Research Using BranchMonitor
+
+* [Malware Variants Identification](https://github.com/marcusbotacin/Malware.Variants)
+
 ## Future Plans
 
-* Multi-Core implementation is coming! I only need to hook
-*HalpPerfInterruptHandler*.
+* Multi-Core implementation is coming!
 * Linux version is coming!
 
 ## Contributions
